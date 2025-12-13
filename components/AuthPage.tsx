@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { CloseIcon, GlobeIcon, PhoneIcon, LockClosedIcon, UserIcon, CalendarIcon, AtSymbolIcon, GoogleLogoIcon } from './icons';
+import { getAuth, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { CloseIcon, GlobeIcon, PhoneIcon, LockClosedIcon, UserIcon, CalendarIcon, AtSymbolIcon, GoogleLogoIcon, SparklesIcon } from './icons';
 import RotatingGlobe from './RotatingGlobe';
 import type { User } from '../types';
 
@@ -13,6 +14,7 @@ const USERS_KEY = 'geosick_users';
 type ViewMode = 'login' | 'signup';
 
 export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) => {
+  const auth = getAuth();
   const [viewMode, setViewMode] = useState<ViewMode>('login');
   
   const [phone, setPhone] = useState('');
@@ -28,6 +30,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) =>
   const [error, setError] = useState<string>('');
   const [infoMessage, setInfoMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   
   const resetForms = () => {
     setPhone('');
@@ -49,7 +52,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) =>
     setIsLoading(true);
 
     try {
-        await new Promise(res => setTimeout(res, 500));
         const allUsers: any[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
         const identifier = loginIdentifier.trim().toLowerCase();
         const foundUser = allUsers.find(u => u.phone === identifier || (u.email && u.email.toLowerCase() === identifier));
@@ -93,7 +95,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) =>
     setIsLoading(true);
     
     try {
-        await new Promise(res => setTimeout(res, 500));
         const allUsers: any[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
 
         const phoneExists = allUsers.some(u => u.phone === phone.trim());
@@ -131,38 +132,45 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) =>
   };
 
   const handleGoogleLogin = async () => {
-    setIsLoading(true);
+    setIsGoogleLoading(true);
     setError('');
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    const googleUser: User = {
-        name: 'Google User',
-        email: 'google@example.com',
-        phone: 'google-oauth-user', // Placeholder
-        date_of_birth: '2000-01-01',
-        gender: 'Prefer not to say',
-        place: 'Internet',
-        created_at: new Date().toISOString(),
-        password: 'google-oauth-dummy-password'
-    };
+    const provider = new GoogleAuthProvider();
 
     try {
-        const allUsers: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-        const existingUserIndex = allUsers.findIndex(u => u.email === googleUser.email);
+        const result = await signInWithPopup(auth, provider);
+        const googleUser = result.user;
 
-        if (existingUserIndex !== -1) {
-            onAuthSuccess(allUsers[existingUserIndex]);
+        const allUsers: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        const existingUser = allUsers.find(u => u.email === googleUser.email);
+
+        if (existingUser) {
+            onAuthSuccess(existingUser);
         } else {
-            allUsers.push(googleUser);
+            const newUser: User = {
+                name: googleUser.displayName || 'Google User',
+                email: googleUser.email,
+                phone: googleUser.phoneNumber || 'google-oauth-user',
+                date_of_birth: '2000-01-01',
+                gender: 'Prefer not to say',
+                place: 'Internet',
+                created_at: new Date().toISOString(),
+                password: 'google-oauth-dummy-password'
+            };
+            allUsers.push(newUser);
             localStorage.setItem(USERS_KEY, JSON.stringify(allUsers));
-            onAuthSuccess(googleUser);
+            onAuthSuccess(newUser);
         }
-    } catch (e) {
-        console.error("Google login error", e);
-        onAuthSuccess(googleUser); // Fallback
+    } catch (error: any) {
+        console.error("Google login error", error);
+        if (error.code === 'auth/popup-blocked') {
+          setError("Your browser has blocked the sign-in popup. Please enable popups for this site and try again.");
+        } else if (error.code === 'auth/popup-closed-by-user') {
+          // This error is common and doesn't always need a message.
+        } else {
+          setError(error.message || "An unknown error occurred during Google login.");
+        }
     } finally {
-        setIsLoading(false);
+        setIsGoogleLoading(false);
     }
   };
   
@@ -179,11 +187,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) =>
         <button
             type="button"
             onClick={handleGoogleLogin}
-            disabled={isLoading}
-            className="w-full bg-white text-slate-700 font-semibold py-3 px-4 rounded-md border border-slate-300 hover:bg-slate-50 transition-all duration-300 flex items-center justify-center gap-3 shadow-sm hover:shadow-md disabled:bg-slate-100 disabled:cursor-not-allowed"
+            disabled={isLoading || isGoogleLoading}
+            className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-4 rounded-md border border-blue-600 transition-all duration-300 flex items-center justify-center gap-3 shadow-sm hover:shadow-md disabled:bg-slate-400 disabled:cursor-not-allowed"
         >
-            <GoogleLogoIcon className="w-5 h-5" />
-            Google
+            {isGoogleLoading ? (
+                <>
+                    <SparklesIcon className="w-5 h-5 animate-pulse" />
+                    <span>Connecting...</span>
+                </>
+            ) : (
+                <>
+                    <GoogleLogoIcon className="w-5 h-5" />
+                    <span>Sign in with Google</span>
+                </>
+            )}
         </button>
     </>
   );
@@ -255,7 +272,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) =>
                 </div>
             </div>
         </div>
-        <button type="submit" disabled={isLoading} className={buttonClasses}>
+        <button type="submit" disabled={isLoading || isGoogleLoading} className={buttonClasses}>
             {isLoading ? 'Creating Account...' : 'Create Account'}
         </button>
         {renderGoogleButton()}
@@ -283,7 +300,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) =>
                 Forgot Password?
             </button>
         </div>
-        <button type="submit" disabled={isLoading} className={buttonClasses}>
+        <button type="submit" disabled={isLoading || isGoogleLoading} className={buttonClasses}>
             {isLoading ? 'Logging In...' : 'Login Securely'}
         </button>
         {renderGoogleButton()}
@@ -333,7 +350,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onClose, onAuthSuccess }) =>
                 </div>
             )}
 
-            {error && <div className="text-sm text-red-600 text-center pt-4">{error}</div>}
+            {error && <div className="mt-4 text-center text-sm text-red-600">{error}</div>}
         </div>
       </div>
     </div>
